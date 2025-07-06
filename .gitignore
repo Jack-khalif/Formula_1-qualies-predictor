@@ -1,0 +1,11 @@
+# Virtual Environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# FastF1 Cache
+fastf1_cache/
+data_cache/
