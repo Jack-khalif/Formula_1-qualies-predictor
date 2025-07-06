@@ -50,119 +50,119 @@ def load_race_data(year, gp_name):
             st.error(f'Could not load race data for {year} {gp_name}: {e}')
             return pd.DataFrame()
 
-# --- User Inputs for Prediction ---
-st.header('Weekly Prediction Inputs')
-st.info('Select the GP for historical data and enter the latest qualifying results below.')
+# --- UI Sidebar and Controls ---
+st.sidebar.header('Settings')
 
-year = 2024 # We'll use 2024 as the year for historical data
+use_synthetic_data = st.sidebar.checkbox('Use Synthetic Qualifying Data', value=True)
 
-# List of GPs from the 2024 season for selection
-gp_list = ['Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China', 'Miami', 'Emilia Romagna', 'Monaco', 'Canada', 'Spain', 'Austria', 'Great Britain', 'Hungary', 'Belgium', 'Netherlands', 'Italy', 'Azerbaijan', 'Singapore', 'United States', 'Mexico', 'Brazil', 'Las Vegas', 'Qatar', 'Abu Dhabi']
+# List of 2024 Grand Prix
+gp_list_2024 = [
+    'Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China', 'Miami',
+    'Emilia Romagna', 'Monaco', 'Canada', 'Spain', 'Austria', 'Great Britain',
+    'Hungary', 'Belgium', 'Netherlands', 'Italy', 'Azerbaijan', 'Singapore',
+    'United States', 'Mexico', 'Brazil', 'Las Vegas', 'Qatar', 'Abu Dhabi'
+]
 
-# Set default to Great Britain (Silverstone)
-try:
-    default_ix = gp_list.index('Great Britain')
-except ValueError:
-    default_ix = 0
+# Dropdown to select the Grand Prix
+gp_name = st.sidebar.selectbox(
+    'Select a Grand Prix for Historical Data (2024 Season):',
+    gp_list_2024,
+    index=gp_list_2024.index('Great Britain')  # Default to Great Britain
+)
+year = 2024
 
-gp_name = st.selectbox('Select Grand Prix for Historical Data:', gp_list, index=default_ix)
+# --- Data Loading Functions ---
 
-race_laps = load_race_data(year, gp_name)
+def load_synthetic_qualifying_data():
+    st.info("Using synthetic qualifying data for Silverstone 2025.")
+    data = {
+        'Driver': ['VER', 'LEC', 'PER', 'SAI', 'HAM', 'RUS', 'NOR', 'PIA', 'ALO', 'OCO', 'BOT', 'ZHO', 'MAG', 'HUL', 'GAS', 'TSU', 'VET', 'STR', 'ALB', 'SAR'],
+        'QualifyingTime': [88.2, 88.4, 88.5, 88.6, 88.8, 88.9, 89.0, 89.1, 89.2, 89.3, 89.4, 89.5, 89.6, 89.7, 89.8, 89.9, 90.0, 90.1, 90.2, 90.3],
+        'DriverName': ['Max Verstappen', 'Charles Leclerc', 'Sergio Pérez', 'Carlos Sainz', 'Lewis Hamilton', 'George Russell', 'Lando Norris', 'Oscar Piastri', 'Fernando Alonso', 'Esteban Ocon', 'Valtteri Bottas', 'Guanyu Zhou', 'Kevin Magnussen', 'Nico Hülkenberg', 'Pierre Gasly', 'Yuki Tsunoda', 'Sebastian Vettel', 'Lance Stroll', 'Alexander Albon', 'Logan Sargeant']
+    }
+    return pd.DataFrame(data)
 
-if not race_laps.empty:
-    # Get average lap times for each driver from the 2024 race
-    avg_race_laps = race_laps.groupby('Driver')['LapTime'].mean().reset_index()
-    avg_race_laps.rename(columns={'LapTime': 'AvgRaceLapTime'}, inplace=True)
-    st.write(f'Historical Average Race Lap Times from {year} {gp_name}:')
-    st.dataframe(avg_race_laps)
+@st.cache_data
+def load_qualifying_data(year, gp_name):
+    cache_file = f'data_cache/qualifying_data_{year}_{gp_name.replace(" ", "_")}.csv'
+    required_cols = ['DriverName', 'Driver', 'QualifyingTime']
 
-    # --- 3. Load Actual Qualifying Data ---
-    st.header('Loading Actual Qualifying Data')
+    if os.path.exists(cache_file):
+        try:
+            data = pd.read_csv(cache_file)
+            if all(col in data.columns for col in required_cols):
+                return data
+        except Exception:
+            pass # Ignore errors, just refetch
 
-    @st.cache_data
-    def load_qualifying_data(year, gp_name):
-        cache_file = f'data_cache/qualifying_data_{year}_{gp_name.replace(" ", "_")}.csv'
-        required_cols = ['DriverName', 'Driver', 'QualifyingTime']
-
-        if os.path.exists(cache_file):
-            try:
-                data = pd.read_csv(cache_file)
-                if all(col in data.columns for col in required_cols):
-                    return data
-            except Exception:
-                pass # Ignore errors, just refetch
-
-        with st.spinner(f'Loading {year} {gp_name} qualifying data from FastF1...'):
-            try:
-                session = ff1.get_session(year, gp_name, 'Q')
-                session.load(laps=True, telemetry=False, weather=False)
-                laps = session.laps
-                if laps.empty:
-                    st.warning(f'No qualifying lap data found for {year} {gp_name}.')
-                    return pd.DataFrame()
-
-                # Correctly find fastest lap and map driver names
-                fastest_laps = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
-                fastest_laps['QualifyingTime'] = fastest_laps['LapTime'].dt.total_seconds()
-
-                # Correctly build the driver name map (Abbreviation -> FullName)
-                driver_map = {drv['Abbreviation']: drv['FullName'] for drv in session.drivers.values()}
-                fastest_laps['DriverName'] = fastest_laps['Driver'].map(driver_map)
-
-                final_data = fastest_laps[['DriverName', 'Driver', 'QualifyingTime']]
-                final_data.to_csv(cache_file, index=False)
-                return final_data
-            except Exception as e:
-                st.error(f'Could not load qualifying data for {year} {gp_name}: {e}')
+    with st.spinner(f'Loading {year} {gp_name} qualifying data from FastF1...'):
+        try:
+            session = ff1.get_session(year, gp_name, 'Q')
+            session.load(laps=True, telemetry=False, weather=False)
+            laps = session.laps
+            if laps.empty:
+                st.warning(f'No qualifying lap data found for {year} {gp_name}.')
                 return pd.DataFrame()
 
-    # We use the same year for qualifying as for the race data for our model
-    qualifying_df_2025 = load_qualifying_data(year, gp_name)
+            fastest_laps = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
+            fastest_laps['QualifyingTime'] = fastest_laps['LapTime'].dt.total_seconds()
+            driver_map = {drv['Abbreviation']: drv['FullName'] for drv in session.drivers.values()}
+            fastest_laps['DriverName'] = fastest_laps['Driver'].map(driver_map)
 
-    if not qualifying_df_2025.empty:
-        st.write(f'Actual Qualifying Results from {year} {gp_name}:')
-        st.dataframe(qualifying_df_2025[['DriverName', 'QualifyingTime']])
+            final_data = fastest_laps[['DriverName', 'Driver', 'QualifyingTime']]
+            final_data.to_csv(cache_file, index=False)
+            return final_data
+        except Exception as e:
+            st.error(f'Could not load qualifying data for {year} {gp_name}: {e}')
+            return pd.DataFrame()
 
-        # --- 4. Merge qualifying and race data ---
-        merged_data = pd.merge(qualifying_df_2025, avg_race_laps, on='Driver', how='inner')
-        
-        if not merged_data.empty:
-            merged_data['AvgRaceLapTime'] = merged_data['AvgRaceLapTime'].dt.total_seconds()
-            st.write('Merged Data for Model Training:')
-            st.dataframe(merged_data[['DriverName', 'QualifyingTime', 'AvgRaceLapTime']])
-
-            if len(merged_data) > 1:
-                # --- 5. Train a model ---
-                st.header('Model Training')
-                X = merged_data[['QualifyingTime']]
-                y = merged_data['AvgRaceLapTime']
-
-                model = LinearRegression()
-                model.fit(X, y)
-                st.success('Model trained successfully!')
-
-                # --- 6. Predict race performance ---
-                st.header('Race Performance Prediction')
-                predicted_race_times = model.predict(qualifying_df_2025[['QualifyingTime']])
-                qualifying_df_2025['PredictedRaceTime'] = predicted_race_times
-
-                # --- 7. Rank drivers ---
-                st.header('Predicted Race Rankings')
-                ranked_drivers = qualifying_df_2025.sort_values(by='PredictedRaceTime').reset_index(drop=True)
-                ranked_drivers['Rank'] = ranked_drivers.index + 1
-                st.dataframe(ranked_drivers[['Rank', 'DriverName', 'QualifyingTime', 'PredictedRaceTime']])
-
-                # --- 8. Evaluate the model ---
-                st.header('Model Evaluation')
-                mae = mean_absolute_error(y, model.predict(X))
-                st.metric(label="Mean Absolute Error (MAE)", value=f"{mae:.4f} seconds")
-                st.info('This MAE is calculated on the training data (drivers present in both datasets).')
-            else:
-                st.warning('Not enough common drivers between qualifying and historical race data to train the model. Need at least two.')
-        else:
-            st.warning('No common drivers found between the qualifying session and the historical race data. Cannot build a model.')
-    else:
-        # This part is executed if qualifying_df_2025 is empty
-        st.info("Prediction will be available once the qualifying session data is loaded.")
+# --- Main Application Logic ---
+if use_synthetic_data:
+    qualifying_df_to_predict = load_synthetic_qualifying_data()
 else:
-    st.error('Could not load initial race data. The application cannot proceed.')
+    qualifying_df_to_predict = load_qualifying_data(year, gp_name)
+
+if qualifying_df_to_predict is not None and not qualifying_df_to_predict.empty:
+    race_df_2024 = load_race_data(year, gp_name)
+
+    if race_df_2024 is not None and not race_df_2024.empty:
+        race_df_2024['RaceTime'] = race_df_2024['LapTime'].dt.total_seconds()
+        avg_race_times_2024 = race_df_2024.groupby('Driver')['RaceTime'].mean().reset_index()
+        
+        qualifying_df_2024 = load_qualifying_data(year, gp_name)
+
+        if qualifying_df_2024 is not None and not qualifying_df_2024.empty:
+            merged_df_2024 = pd.merge(qualifying_df_2024, avg_race_times_2024, on='Driver')
+
+            if not merged_df_2024.empty:
+                X_train = merged_df_2024[['QualifyingTime']]
+                y_train = merged_df_2024['RaceTime']
+                model = LinearRegression()
+                model.fit(X_train, y_train)
+
+                X_pred = qualifying_df_to_predict[['QualifyingTime']]
+                predicted_race_times = model.predict(X_pred)
+                qualifying_df_to_predict['PredictedRaceTime'] = predicted_race_times
+
+                ranked_drivers = qualifying_df_to_predict.sort_values(by='PredictedRaceTime').reset_index(drop=True)
+                ranked_drivers.index += 1
+
+                st.subheader('Predicted Race Performance Ranking')
+                
+                # --- Visualization ---
+                viz_df = ranked_drivers.set_index('DriverName')
+                st.bar_chart(viz_df[['PredictedRaceTime']])
+
+                with st.expander("View Detailed Ranking Data"):
+                    st.dataframe(ranked_drivers[['DriverName', 'PredictedRaceTime']])
+
+                mae = mean_absolute_error(y_train, model.predict(X_train))
+                st.sidebar.info(f'Model trained on {year} {gp_name} data.\nMAE: {mae:.2f}s')
+            else:
+                st.error('Could not merge 2024 qualifying and race data for training.')
+        else:
+            st.warning('Could not load 2024 qualifying data for model training.')
+    else:
+        st.warning('Could not load 2024 race data for model training.')
+else:
+    st.warning('Prediction will be available once qualifying data is loaded.')
